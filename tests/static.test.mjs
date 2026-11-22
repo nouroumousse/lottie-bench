@@ -44,7 +44,7 @@ test('nested vector and animated property rows are generated in the timeline', a
 
 test('canvas hit-testing maps descendant SVG nodes back to their source layer', async () => {
   const app = await read('src/app.mjs');
-  assert.match(app, /findLayerFromTarget\(target,elements,curLayers\(\),st\.locked\)/);
+  assert.match(app, /findLayerFromTargets\\(stack,elements,curLayers\\(\\),st\\.locked\\)/);
   assert.match(app, /target\?\.closest\?\.\('\.lot'\)/);
 });
 
