@@ -1,7 +1,7 @@
 /**
- * Resolve an SVG preview target to its source Lottie layer.
- * Lottie SVGRenderer.elements is indexed in the same order as animationData.layers.
- * Walk target ancestors so nested SVG path/group hits resolve to their owning layer.
+ * Resolve rendered SVG targets to their source Lottie layer.
+ * SVGRenderer.elements is indexed in the same order as animationData.layers.
+ * Walk each target's ancestors so paths and nested groups resolve to their owner.
  */
 function baseElementOf(rendererElement) {
   if (!rendererElement || rendererElement === true) return null;
@@ -23,9 +23,8 @@ export function findLayerFromTarget(target, rendererElements, layers, locked = {
     ancestors.add(node);
     node = node.parentNode || node.host || null;
   }
-
   const count = Math.min(rendererElements.length, layers.length);
-  // SVG stacking order places later Lottie layers above earlier ones.
+  // Reverse order gives front-most layer priority for overlapping hit regions.
   for (let index = count - 1; index >= 0; index -= 1) {
     const layer = layers[index];
     if (!layer || layer.hd || locked[layer.ind]) continue;
@@ -33,6 +32,15 @@ export function findLayerFromTarget(target, rendererElements, layers, locked = {
     if (!base) continue;
     if (ancestors.has(base)) return layer;
     if (typeof base.contains === 'function' && base.contains(target)) return layer;
+  }
+  return null;
+}
+
+export function findLayerFromTargets(targets, rendererElements, layers, locked = {}) {
+  if (!Array.isArray(targets)) return null;
+  for (const target of targets) {
+    const layer = findLayerFromTarget(target, rendererElements, layers, locked);
+    if (layer) return layer;
   }
   return null;
 }
