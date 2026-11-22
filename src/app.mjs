@@ -5,6 +5,7 @@ import {
 } from './lottie-core.mjs';
 import { SnapshotHistory } from './history.mjs';
 import { timelineScale, frameToTimelineX, clientXToFrame } from './timeline.mjs';
+import { findLayerFromTarget } from './hit-testing.mjs';
 const normalize = normalizeAnimation;
 function readRow(row, frame) {
   const value = getValue(row.prop, frame - row.off);
@@ -166,7 +167,7 @@ function buildRows(L,layers){
 /* ---------- state ---------- */
 const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
-const st={comp:null,ctx:null,sel:null,kf:null,t:0,playing:false,loop:true,speed:1,tool:'select',zoom:1,tlzoom:1,expanded:{},locked:{},link:{},tab:'props',center:true,transp:false,ppf:4,pen:[],minify:false};
+const st={comp:null,ctx:null,sel:null,itemSel:null,kf:null,t:0,playing:false,loop:true,speed:1,tool:'select',zoom:1,tlzoom:1,expanded:{},locked:{},link:{},tab:'props',center:true,transp:false,ppf:4,pen:[],minify:false};
 const C=()=>st.comp;
 function curLayers(){
   if(st.ctx){ const a=st.comp.assets.find(x=>x.id===st.ctx); if(a&&Array.isArray(a.layers)) return a.layers; st.ctx=null; }
@@ -280,8 +281,8 @@ function saveLocal(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{ localStor
 function exportData(){ return exportAnimation(st.comp); }
 
 /* ---------- layers panel ---------- */
-function selectLayer(ind,keepKf){
-  st.sel=ind; if(!keepKf) st.kf=null;
+function selectLayer(ind,keepKf,itemRef=null){
+  st.sel=ind; st.itemSel=itemRef; if(!keepKf) st.kf=null;
   if(ind!=null) st.expanded[ind]=true;
   queue('layers','panel','tl','sync'); positionOverlay();
 }
@@ -293,7 +294,7 @@ function renderLayers(){
   const ls=curLayers();
   if(!ls.length) box.append(h('div',{class:'empty'},'No layers yet. Use + Add above.'));
   ls.forEach(L=>{
-    const row=h('div',{class:'lrow'+(st.sel===L.ind?' sel':''),onclick:()=>selectLayer(L.ind),ondblclick:()=>rename(L,row)},
+    const row=h('div',{class:'lrow'+(st.sel===L.ind?' sel':''),role:'button','aria-selected':st.sel===L.ind?'true':'false',tabindex:'0',onclick:e=>{ if(e.target.closest('button')) return; selectLayer(L.ind); },onkeydown:e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); selectLayer(L.ind); } },ondblclick:()=>rename(L,row)},
       h('button',{class:'ib sm',title:'Show / hide',onclick:e=>{e.stopPropagation(); mutate(()=>{ L.hd=!L.hd; },null);}},icon(L.hd?'eyeoff':'eye')),
       h('button',{class:'ib sm',title:'Lock (ignored by canvas clicks)',onclick:e=>{e.stopPropagation(); st.locked[L.ind]=!st.locked[L.ind]; queue('layers');}},icon(st.locked[L.ind]?'lock':'unlock')),
       h('span',{class:'badge'},TYPEBADGE[L.ty]||'?'),
@@ -348,7 +349,8 @@ function renderPanel(){
   PS.forEach(f=>f());
 }
 function headRow(r,L){
-  const el=h('div',{class:'ph d'+Math.min(r.depth||0,4)},h('span',{class:'t'},r.label));
+  const active=st.itemSel&&st.itemSel.ind===L.ind&&st.itemSel.key===r.key;
+  const el=h('div',{class:'ph d'+Math.min(r.depth||0,4)+(active?' active-item':''),h('span',{class:'t'},r.label));
   if(r.add){
     const sel=h('select',{class:'mini',title:'Add to '+r.label,onchange:()=>{ const v=sel.value; sel.value=''; if(v) structural(()=>applyAdd(r.add.arr,v,r.add.top)); }},h('option',{value:''},'+ Add'),r.add.options.map(([v,l])=>h('option',{value:v},l)));
     el.append(sel);
@@ -585,8 +587,18 @@ function reloadStage(){
     watchdog=setTimeout(()=>fail(new Error('Preview loading timed out after 10 seconds.')),10000);
   }catch(error){ fail(error); }
 }
+function insertLayerKeyframes(){
+  const L=st.sel!=null?findL(st.sel):null;
+  if(!L) return toast('Select a layer first',true);
+  const rows=buildRows(L,curLayers()).filter(row=>row.type==='prop'&&row.prop&&row.prop.a);
+  if(!rows.length) return toast('This layer has no animated properties yet',true);
+  mutate(()=>{
+    rows.forEach(row=>writeRow(row,st.t,readRow(row,st.t)));
+  },null,{panel:true});
+  toast('Keyframes inserted at '+((st.t-st.comp.ip)/st.comp.fr).toFixed(2)+' s');
+}
 function setT(t){
-  const c=st.comp; t=Math.max(c.ip,Math.min(c.op-0.001,t)); st.t=t;
+  const c=st.comp; t=Math.max(c.ip,Math.min(c.op-0.001,Number(t)||c.ip)); st.t=t;
   if(anim){ try{ anim.goToAndStop(Math.min(t,c.op-0.001)-c.ip,true); }catch(e){} }
   updatePlayhead(); PS.forEach(f=>f()); updTransport(); positionOverlay();
 }
@@ -594,25 +606,32 @@ function positionOverlay(){
   const box=$('#selbox'); box.style.display='none';
   if(st.ctx||st.sel==null||!anim||!anim.renderer||st.tool==='pen') return;
   const idx=st.comp.layers.findIndex(l=>l.ind===st.sel); if(idx<0) return;
-  const el=anim.renderer.elements&&anim.renderer.elements[idx]; const g=el&&(el.layerElement||el.baseElement); if(!g||!g.getBoundingClientRect) return;
+  const el=anim.renderer.elements&&anim.renderer.elements[idx];
+  const g=el&&(typeof el.getBaseElement==='function'?el.getBaseElement():(el.layerElement||el.baseElement));
+  if(!g||!g.getBoundingClientRect) return;
   const r=g.getBoundingClientRect(),cr=$('#canvas').getBoundingClientRect();
   if(r.width<1||r.height<1) return;
   Object.assign(box.style,{display:'block',left:(r.left-cr.left)+'px',top:(r.top-cr.top)+'px',width:r.width+'px',height:r.height+'px'});
 }
 function hitLayer(target){
-  const els=anim&&anim.renderer&&anim.renderer.elements; if(!els||st.ctx) return null;
-  for(let i=0;i<els.length;i++){
-    const el=els[i],g=el&&(el.layerElement||el.baseElement),L=st.comp.layers[i];
-    if(g&&g.contains&&g.contains(target)&&L&&!st.locked[L.ind]) return L;
-  }
-  return null;
+  const renderer=anim&&anim.renderer;
+  const elements=renderer&&renderer.elements;
+  if(!elements) return null;
+  return findLayerFromTarget(target,elements,curLayers(),st.locked);
 }
 function posRows(L){ return buildRows(L,curLayers()).filter(r=>r.type==='prop'&&(r.key==='ks.p'||r.key==='ks.p.x'||r.key==='ks.p.y')); }
 $('#canvas').addEventListener('pointerdown',e=>{
   const cv=$('#canvas'),r=cv.getBoundingClientRect();
   if(st.tool==='pen'){ e.preventDefault(); penClick((e.clientX-r.left)/st.scale,(e.clientY-r.top)/st.scale,e); return; }
-  const L=hitLayer(e.target);
-  if(!L){ if(e.target===cv||e.target.closest('.lot')){ st.sel=null; st.kf=null; queue('layers','panel','tl'); positionOverlay(); } return; }
+  const target=e.target instanceof Element?e.target:e.target?.parentElement;
+  const L=hitLayer(target);
+  if(!L){
+    if(target===cv||target?.closest?.('.lot')){
+      st.sel=null; st.itemSel=null; st.kf=null;
+      queue('layers','panel','tl'); positionOverlay();
+    }
+    return;
+  }
   e.preventDefault();
   if(st.sel!==L.ind) selectLayer(L.ind);
   const pr=posRows(L); if(!pr.length) return;
@@ -678,19 +697,27 @@ function updTransport(){
   const title=$('#docTitle'),meta=$('#docMeta');
   if(title) title.textContent=c.nm||'Untitled animation';
   if(meta) meta.textContent=c.w+' × '+c.h;
-  $('#tPlay').textContent=''; $('#tPlay').append(icon(st.playing?'pause':'play'),document.createTextNode(st.playing?' Pause':' Play'));
+  const play=$('#tPlay');
+  play.textContent=''; play.append(icon(st.playing?'pause':'play'));
+  play.setAttribute('aria-label',st.playing?'Pause playback':'Play animation');
   $('#tLoop').classList.toggle('on',st.loop);
-  const fr=$('#tFrame'); if(document.activeElement!==fr) fr.value=String(Math.round(st.t));
+  const fr=$('#tFrame');
+  if(document.activeElement!==fr) fr.value=((st.t-c.ip)/c.fr).toFixed(2);
+  $('#timeDuration').textContent=((c.op-c.ip)/c.fr).toFixed(2)+' s';
   $('#timefld').textContent=((st.t-c.ip)/c.fr).toFixed(2)+'s / '+((c.op-c.ip)/c.fr).toFixed(2)+'s · '+(c.op-c.ip)+'f';
   $('#btnUndo').disabled=!history.canUndo; $('#btnRedo').disabled=!history.canRedo;
 }
 
 /* ---------- timeline ---------- */
 function timelineLabelWidth(){
-  const label=$('#tlinner .tr.ruler .lab');
-  if(!label) return 326;
-  const width=label.getBoundingClientRect().width;
-  return Number.isFinite(width)&&width>0?width:326;
+  const left=$('#timeline-left');
+  if(left){
+    const width=left.getBoundingClientRect().width;
+    if(Number.isFinite(width)&&width>0) return width;
+  }
+  const row=$('#tlinner .tr .lab');
+  const fallback=row&&row.getBoundingClientRect().width;
+  return Number.isFinite(fallback)&&fallback>0?fallback:398;
 }
 function xToT(clientX){
   const inner=$('#tlinner').getBoundingClientRect();
@@ -698,94 +725,188 @@ function xToT(clientX){
 }
 function updatePlayhead(){
   const playhead=$('#ph');
-  if(playhead) playhead.style.left=frameToTimelineX(st.t,st.comp.ip,st.ppf,timelineLabelWidth())+'px';
+  if(playhead){
+    playhead.style.left=frameToTimelineX(st.t,st.comp.ip,st.ppf,timelineLabelWidth())+'px';
+    playhead.dataset.frame=String(Math.round(st.t-st.comp.ip));
+  }
+  const ruler=$('#tlruler'),sc=$('#tlscroll');
+  if(ruler&&sc) ruler.style.transform='translateX('+(-sc.scrollLeft)+'px)';
 }
 function scrub(e){
+  if(e.target?.closest?.('.ruler-tools')) return;
   const inner=$('#tlinner').getBoundingClientRect();
   if(e.clientX-inner.left<timelineLabelWidth()) return;
   if(st.playing) pause();
   setT(Math.round(xToT(e.clientX)));
   drag(e,ev=>setT(Math.round(xToT(ev.clientX))));
 }
-function renderTimeline(){
-  const sc=$('#tlscroll'),inner=$('#tlinner'),c=st.comp,sl=sc.scrollLeft,stp=sc.scrollTop;
-  inner.textContent='';
-  const duration=Math.max(1,c.op-c.ip);
-  const ruler=h('div',{class:'tr ruler'},h('div',{class:'lab'},'Frames'),h('div',{class:'track'}));
-  inner.append(ruler);
-  const labelWidth=timelineLabelWidth();
-  const metrics=timelineScale({viewportWidth:sc.clientWidth,labelWidth,duration,zoom:st.tlzoom});
-  const ppf=metrics.pixelsPerFrame,W=metrics.trackWidth;
-  st.ppf=ppf;
-  inner.style.width=metrics.contentWidth+'px';
-  ruler.lastChild.style.width=W+'px';
-  const step=[1,2,5,10,15,30,60,120,300,600].find(value=>value*ppf>=46)||1200;
-  for(let frame=Math.ceil(c.ip/step)*step;frame<=c.op;frame+=step){
-    ruler.lastChild.append(h('div',{class:'tick',style:'left:'+(frame-c.ip)*ppf+'px'},h('span',{},String(frame))));
-  }
-  ruler.addEventListener('pointerdown',scrub);
-  curLayers().forEach(L=>{
-    const open=!!st.expanded[L.ind],isSel=st.sel===L.ind;
-    const lab=h('div',{class:'lab'+(isSel?' sel':''),onclick:()=>{ if(st.sel!==L.ind) selectLayer(L.ind); }},
-      h('button',{class:'ib sm',onclick:e=>{ e.stopPropagation(); st.expanded[L.ind]=!open; renderTimeline(); }},icon(open?'chevD':'chevR')),
-      h('span',{class:'badge'},TYPEBADGE[L.ty]||'?'),h('span',{class:'nm'},L.nm||('Layer '+L.ind)));
-    const track=h('div',{class:'track',style:'width:'+W+'px'});
-    const layerIn=Number.isFinite(L.ip)?L.ip:c.ip;
-    const layerOut=Number.isFinite(L.op)?L.op:c.op;
-    const barLeft=(layerIn-c.ip)*ppf;
-    const barWidth=Math.max(6,(layerOut-layerIn)*ppf);
-    const bar=h('div',{class:'bar'+(isSel?' sel':''),style:'left:'+barLeft+'px;width:'+barWidth+'px',title:'Drag to move in time; drag the ends to trim'},h('div',{class:'hd l'}),h('div',{class:'hd r'}));
-    bar.addEventListener('pointerdown',e=>{
-      e.stopPropagation(); e.preventDefault(); if(st.sel!==L.ind) selectLayer(L.ind);
-      const mode=e.target.classList.contains('l')?'in':e.target.classList.contains('r')?'out':'move';
-      const x0=e.clientX,ip0=L.ip,op0=L.op,s0=L.st||0,key='bar'+L.ind+mode; beginGesture(key);
-      drag(e,ev=>{ const delta=Math.round((ev.clientX-x0)/st.ppf); mutate(()=>{
+function timelineEntriesForLayer(L,layers){
+  const entries=[];
+  const rows=buildRows(L,layers);
+  let activeItem=null;
+  rows.forEach(row=>{
+    if(row.type==='head'&&row.item&&row.item.ty!=='tr'){
+      const type=row.item.ty;
+      if(!['gr','sh','rc','el','sr'].includes(type)) return;
+      const label=type==='sh'&&!row.item.nm?'Vector':row.label;
+      activeItem={key:row.key,item:row.item,label,depth:Math.max(1,(row.depth||1)+1)};
+      entries.push({kind:'item',...activeItem});
+      return;
+    }
+    if(row.type==='prop'&&row.prop&&row.prop.a){
+      entries.push({
+        kind:'property',row,label:row.label,
+        depth:Math.max(1,(row.depth||0)+1),
+        parentKey:activeItem?.key||null,
+        parentItem:activeItem?.item||null
+      });
+    }
+  });
+  return entries;
+}
+function makeTimelineLabel(kind,label,depth,selected,onSelect){
+  const glyph=h('span',{class:'timeline-glyph '+kind});
+  if(kind==='artboard') glyph.textContent='ℓ';
+  else if(kind==='layer') glyph.append(h('span',{},'▱'));
+  else if(kind==='item') glyph.textContent='◇';
+  else glyph.textContent='◇';
+  const lab=h('div',{class:'lab '+(kind==='artboard'?'artboard-lab':kind==='layer'?'layer-lab':kind==='item'?'item-lab':'prop-lab')+(selected?' sel':''),style:'padding-left:'+(18+Math.max(0,depth)*20)+'px',onclick:onSelect,title:label});
+  lab.append(glyph,h('span',{class:'nm'},label));
+  return lab;
+}
+function addLayerBar(track,L,selected,ppf,comp){
+  const layerIn=Number.isFinite(L.ip)?L.ip:comp.ip;
+  const layerOut=Number.isFinite(L.op)?L.op:comp.op;
+  const left=(layerIn-comp.ip)*ppf;
+  const width=Math.max(6,(layerOut-layerIn)*ppf);
+  const bar=h('div',{class:'track-bar'+(selected?' sel':''),style:'left:'+left+'px;width:'+width+'px',title:'Drag to move this layer; drag either edge to trim it'});
+  const inner=h('div',{class:'hd l'});
+  const outer=h('div',{class:'hd r'});
+  bar.append(inner,outer);
+  bar.addEventListener('pointerdown',e=>{
+    e.stopPropagation(); e.preventDefault();
+    const mode=e.target.classList.contains('l')?'in':e.target.classList.contains('r')?'out':'move';
+    const x0=e.clientX,ip0=Number.isFinite(L.ip)?L.ip:comp.ip,op0=Number.isFinite(L.op)?L.op:comp.op,s0=L.st||0,key='bar'+L.ind+mode;
+    beginGesture(key);
+    drag(e,ev=>{
+      const delta=Math.round((ev.clientX-x0)/st.ppf);
+      if(!delta) return;
+      mutate(()=>{
         if(mode==='move'){ L.ip=ip0+delta; L.op=op0+delta; L.st=s0+delta; }
         else if(mode==='in') L.ip=Math.min(ip0+delta,L.op-1);
         else L.op=Math.max(op0+delta,L.ip+1);
-      },key); },endGesture);
+      },key);
+    },endGesture);
+  });
+  track.append(bar);
+}
+function addPropertyKeyframes(track,entry,L,ppf,comp){
+  const row=entry.row, property=row.prop;
+  const line=h('div',{class:'property-range'});
+  track.append(line);
+  property.k.forEach(keyframe=>{
+    const frame=keyframe.t+row.off;
+    const selected=st.kf&&st.kf.ind===L.ind&&st.kf.key===row.key&&st.kf.kf===keyframe;
+    const diamond=h('div',{class:'kf'+(selected?' sel':''),style:'left:'+(frame-comp.ip)*ppf+'px',title:'Frame '+fmt(frame)});
+    diamond.addEventListener('pointerdown',e=>{
+      e.stopPropagation(); e.preventDefault();
+      selectLayer(L.ind,false,{key:entry.parentKey||row.key,item:entry.parentItem||null});
+      st.kf={ind:L.ind,key:row.key,kf:keyframe};
+      queue('layers','panel','tl'); setT(frame);
+      const x0=e.clientX,t0=keyframe.t,key='kd'+L.ind+row.key;
+      beginGesture(key);
+      drag(e,ev=>{
+        const delta=Math.round((ev.clientX-x0)/st.ppf);
+        if(!delta) return;
+        mutate(()=>{ keyframe.t=t0+delta; property.k.sort((a,b)=>a.t-b.t); },key);
+        setT(keyframe.t+row.off);
+      },()=>{ endGesture(); queue('panel'); });
     });
-    track.append(bar);
-    inner.append(h('div',{class:'tr'},lab,track));
-    if(!open) return;
-    buildRows(L,curLayers()).forEach(row=>{
-      if(row.type==='head'&&!row.pono&&row.item&&row.item.ty==='tr') return;
-      if(row.type==='head'&&!row.pono){
-        inner.append(h('div',{class:'tr headrow'},h('div',{class:'lab',style:'padding-left:'+(22+(row.depth||0)*10)+'px'},row.label),h('div',{class:'track',style:'width:'+W+'px'})));
-        return;
+    track.append(diamond);
+  });
+  track.addEventListener('pointerdown',scrub);
+  track.addEventListener('dblclick',e=>{
+    const frame=Math.round(xToT(e.clientX)); setT(frame);
+    mutate(()=>{
+      if(!property.a) toggleAnim(row,frame);
+      else if(!property.k.some(keyframe=>Math.abs(keyframe.t+row.off-frame)<0.5)){
+        addKey(property,Math.round(frame-row.off),row.kind==='num'?readRow(row,frame):readRow(row,frame).slice());
       }
-      if(row.type!=='prop') return;
-      const label=h('div',{class:'lab',style:'padding-left:'+(30+(row.depth||0)*8)+'px',title:row.label},h('span',{class:'nm'},row.label));
-      const propertyTrack=h('div',{class:'track'+(row.prop.a?'':' static'),style:'width:'+W+'px'});
-      if(row.prop.a) row.prop.k.forEach(keyframe=>{
-        const selected=st.kf&&st.kf.kf===keyframe;
-        const diamond=h('div',{class:'kf'+(selected?' sel':''),style:'left:'+(keyframe.t+row.off-c.ip)*ppf+'px',title:'Frame '+fmt(keyframe.t+row.off)});
-        diamond.addEventListener('pointerdown',e=>{
-          e.stopPropagation(); e.preventDefault();
-          if(st.sel!==L.ind) st.sel=L.ind;
-          st.kf={ind:L.ind,key:row.key,kf:keyframe}; queue('layers','panel','tl'); setT(Math.round(keyframe.t+row.off));
-          const x0=e.clientX,t0=keyframe.t,key='kd'+L.ind+row.key; beginGesture(key); let moved=false;
-          drag(e,ev=>{
-            const delta=Math.round((ev.clientX-x0)/st.ppf); if(!moved&&!delta) return; moved=true;
-            mutate(()=>{ keyframe.t=t0+delta; row.prop.k.sort((a,b)=>a.t-b.t); },key);
-            setT(Math.round(keyframe.t+row.off));
-          },()=>{ endGesture(); queue('panel'); });
+    },null,{panel:true});
+  });
+}
+function renderTimeline(){
+  const sc=$('#tlscroll'),inner=$('#tlinner'),c=st.comp;
+  if(!sc||!inner||!c) return;
+  const sl=sc.scrollLeft,stp=sc.scrollTop;
+  inner.textContent='';
+  const duration=Math.max(1,c.op-c.ip);
+  const labelWidth=timelineLabelWidth();
+  const metrics=timelineScale({viewportWidth:sc.clientWidth,labelWidth,duration,zoom:st.tlzoom,gutter:30});
+  const ppf=metrics.pixelsPerFrame,W=metrics.trackWidth;
+  st.ppf=ppf;
+  inner.style.width=metrics.contentWidth+'px';
+
+  // The ruler lives in the transport header and scrolls in lockstep with the tracks.
+  const ruler=$('#tlruler');
+  if(ruler){
+    ruler.textContent='';
+    ruler.style.width=W+'px';
+    const seconds=Math.max(0,duration/c.fr);
+    const pxPerSecond=ppf*c.fr;
+    const majorStep=[0.1,0.2,0.25,0.5,1,2,5,10,30,60].find(step=>step*pxPerSecond>=145)||120;
+    const minorStep=majorStep>=1?majorStep/5:majorStep/5;
+    for(let sec=0;sec<=seconds+minorStep/2;sec+=minorStep){
+      const x=sec*pxPerSecond;
+      if(x>W+1) break;
+      const major=Math.abs(sec/majorStep-Math.round(sec/majorStep))<0.001;
+      if(major){
+        const tick=h('div',{class:'major-tick'+(sec<0.001?' first':''),style:'left:'+x+'px'});
+        if(sec>0.001||seconds<=0.5) tick.append(h('span',{},sec.toFixed(1)));
+        ruler.append(tick);
+      }else ruler.append(h('div',{class:'minor-dot',style:'left:'+x+'px'}));
+    }
+  }
+
+  const appendRow=(kind,label,depth,selected,select,draw)=>{
+    const lab=makeTimelineLabel(kind,label,depth,selected,select);
+    const track=h('div',{class:'track'});
+    if(draw) draw(track);
+    inner.append(h('div',{class:'tr '+kind},lab,track));
+  };
+
+  // Artboard row is a stable root track above the layer hierarchy.
+  appendRow('artboard','Artboard 1',0,false,()=>{ st.sel=null; st.itemSel=null; st.kf=null; queue('layers','panel','tl'); positionOverlay(); },track=>{
+    const bar=h('div',{class:'track-bar artboard-bar',style:'left:0;width:'+W+'px',title:'Composition duration'});
+    track.append(bar);
+  });
+
+  curLayers().forEach(L=>{
+    const selected=st.sel===L.ind;
+    const open=!!st.expanded[L.ind];
+    appendRow('layer',L.nm||('Layer '+L.ind),0,selected,()=>selectLayer(L.ind),track=>{
+      addLayerBar(track,L,selected,ppf,c);
+    });
+    if(!open) return;
+
+    timelineEntriesForLayer(L,curLayers()).forEach(entry=>{
+      if(entry.kind==='item'){
+        const itemSelected=st.itemSel&&st.itemSel.ind===L.ind&&st.itemSel.key===entry.key;
+        appendRow('item',entry.label,entry.depth,itemSelected,()=>selectLayer(L.ind,false,{key:entry.key,item:entry.item}),track=>{
+          addLayerBar(track,L,itemSelected,ppf,c);
         });
-        propertyTrack.append(diamond);
-      });
-      propertyTrack.addEventListener('dblclick',e=>{
-        const frame=Math.round(xToT(e.clientX)); setT(frame);
-        mutate(()=>{
-          if(!row.prop.a) toggleAnim(row,frame);
-          else if(!row.prop.k.some(keyframe=>Math.abs(keyframe.t+row.off-frame)<0.5)) addKey(row.prop,Math.round(frame-row.off),row.kind==='num'?readRow(row,frame):readRow(row,frame).slice());
-        },null,{panel:true});
-      });
-      propertyTrack.addEventListener('pointerdown',scrub);
-      inner.append(h('div',{class:'tr prop'},label,propertyTrack));
+      }else{
+        const propertySelected=st.kf&&st.kf.ind===L.ind&&st.kf.key===entry.row.key;
+        appendRow('property',entry.label,entry.depth,propertySelected,()=>selectLayer(L.ind,false,{key:entry.parentKey||entry.row.key,item:entry.parentItem||null}),track=>{
+          addPropertyKeyframes(track,entry,L,ppf,c);
+        });
+      }
     });
   });
-  inner.append(h('div',{id:'ph'}));
-  sc.scrollLeft=sl; sc.scrollTop=stp; updatePlayhead();
+
+  inner.append(h('div',{id:'ph','data-frame':String(Math.round(st.t-c.ip))}));
+  sc.scrollLeft=sl; sc.scrollTop=stp;
+  updatePlayhead();
 }
 
 /* ---------- JSON pane + export ---------- */
@@ -865,12 +986,15 @@ function wire(){
   $('#zFit').onclick=()=>{ st.zoom=1; layoutStage(); };
   $('#transp').onchange=e=>{ st.transp=e.target.checked; layoutStage(); };
   $('#tPlay').onclick=()=>st.playing?pause():play();
+  $('#tRecord').onclick=insertLayerKeyframes;
+  $('#tPlay').setAttribute('aria-label','Play animation');
   $('#tFirst').onclick=()=>{ pause(); setT(st.comp.ip); };
   $('#tLast').onclick=()=>{ pause(); setT(st.comp.op-1); };
   $('#tLoop').onclick=()=>{ st.loop=!st.loop; updTransport(); };
-  $('#tFrame').oninput=e=>{ const v=e.target.valueAsNumber; if(Number.isFinite(v)){ if(st.playing) pause(); setT(Math.round(v)); } };
+  $('#tFrame').oninput=e=>{ const v=e.target.valueAsNumber; if(Number.isFinite(v)){ if(st.playing) pause(); setT(st.comp.ip+v*st.comp.fr); } };
   $('#tSpeed').onchange=e=>{ st.speed=+e.target.value; };
   $('#tlZoom').oninput=e=>{ st.tlzoom=+e.target.value; renderTimeline(); };
+  $('#tlscroll').addEventListener('scroll',()=>updatePlayhead(),{passive:true});
   new ResizeObserver(()=>queue('layout','tl')).observe($('#stagearea'));
   addEventListener('keydown',e=>{
     const tg=e.target&&e.target.tagName; const typing=tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT';
