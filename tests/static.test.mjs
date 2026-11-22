@@ -14,6 +14,7 @@ test('timeline has a fixed transport column and a separate ruler viewport', asyn
   assert.match(html, /id="timeline-left"/);
   assert.match(html, /id="tlrulerViewport"/);
   assert.match(html, /id="tlruler"/);
+  assert.match(html, /id="tlRulerPh"/);
   assert.match(html, /grid-template-rows:80px minmax\(0,1fr\)/);
   assert.match(html, /width:398px;min-width:398px;max-width:398px/);
 });
@@ -38,6 +39,7 @@ test('nested vector and animated property rows are generated in the timeline', a
   assert.match(app, /function timelineEntriesForLayer/);
   assert.match(app, /row\.item\.ty/);
   assert.match(app, /row\.prop&&row\.prop\.a/);
+  assert.match(app, /class:'track',style:'width:'\+W\+'px'/);
 });
 
 test('canvas hit-testing maps descendant SVG nodes back to their source layer', async () => {
