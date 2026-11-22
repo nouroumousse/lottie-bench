@@ -350,7 +350,7 @@ function renderPanel(){
 }
 function headRow(r,L){
   const active=st.itemSel&&st.itemSel.ind===L.ind&&st.itemSel.key===r.key;
-  const el=h('div',{class:'ph d'+Math.min(r.depth||0,4)+(active?' active-item':''),h('span',{class:'t'},r.label));
+  const el=h('div',{class:'ph d'+Math.min(r.depth||0,4)+(active?' active-item':'')},h('span',{class:'t'},r.label));
   if(r.add){
     const sel=h('select',{class:'mini',title:'Add to '+r.label,onchange:()=>{ const v=sel.value; sel.value=''; if(v) structural(()=>applyAdd(r.add.arr,v,r.add.top)); }},h('option',{value:''},'+ Add'),r.add.options.map(([v,l])=>h('option',{value:v},l)));
     el.append(sel);
@@ -724,13 +724,19 @@ function xToT(clientX){
   return clientXToFrame(clientX,inner.left,st.comp.ip,st.ppf,timelineLabelWidth());
 }
 function updatePlayhead(){
+  const frameOffset=st.t-st.comp.ip;
+  const labelWidth=timelineLabelWidth();
   const playhead=$('#ph');
   if(playhead){
-    playhead.style.left=frameToTimelineX(st.t,st.comp.ip,st.ppf,timelineLabelWidth())+'px';
-    playhead.dataset.frame=String(Math.round(st.t-st.comp.ip));
+    playhead.style.left=frameToTimelineX(st.t,st.comp.ip,st.ppf,labelWidth)+'px';
+    playhead.dataset.frame=String(Math.round(frameOffset));
   }
-  const ruler=$('#tlruler'),sc=$('#tlscroll');
+  const ruler=$('#tlruler'),sc=$('#tlscroll'),rulerHead=$('#tlRulerPh');
   if(ruler&&sc) ruler.style.transform='translateX('+(-sc.scrollLeft)+'px)';
+  if(rulerHead&&sc){
+    rulerHead.style.left=(frameOffset*st.ppf-sc.scrollLeft)+'px';
+    rulerHead.dataset.frame=String(Math.round(frameOffset));
+  }
 }
 function scrub(e){
   if(e.target?.closest?.('.ruler-tools')) return;
@@ -870,7 +876,7 @@ function renderTimeline(){
 
   const appendRow=(kind,label,depth,selected,select,draw)=>{
     const lab=makeTimelineLabel(kind,label,depth,selected,select);
-    const track=h('div',{class:'track'});
+    const track=h('div',{class:'track',style:'width:'+W+'px'});
     if(draw) draw(track);
     inner.append(h('div',{class:'tr '+kind},lab,track));
   };
