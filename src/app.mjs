@@ -5,7 +5,7 @@ import {
 } from './lottie-core.mjs';
 import { SnapshotHistory } from './history.mjs';
 import { timelineScale, frameToTimelineX, clientXToFrame } from './timeline.mjs';
-import { findLayerFromTarget } from './hit-testing.mjs';
+import { findLayerFromTargets } from './hit-testing.mjs';
 const normalize = normalizeAnimation;
 function readRow(row, frame) {
   const value = getValue(row.prop, frame - row.off);
@@ -613,18 +613,22 @@ function positionOverlay(){
   if(r.width<1||r.height<1) return;
   Object.assign(box.style,{display:'block',left:(r.left-cr.left)+'px',top:(r.top-cr.top)+'px',width:r.width+'px',height:r.height+'px'});
 }
-function hitLayer(target){
+function hitLayer(target,clientX,clientY){
   const renderer=anim&&anim.renderer;
   const elements=renderer&&renderer.elements;
   if(!elements) return null;
-  return findLayerFromTarget(target,elements,curLayers(),st.locked);
+  let stack=[target];
+  if(Number.isFinite(clientX)&&Number.isFinite(clientY)&&typeof document.elementsFromPoint==='function'){
+    try{ stack=[...document.elementsFromPoint(clientX,clientY),target]; }catch(error){}
+  }
+  return findLayerFromTargets(stack,elements,curLayers(),st.locked);
 }
 function posRows(L){ return buildRows(L,curLayers()).filter(r=>r.type==='prop'&&(r.key==='ks.p'||r.key==='ks.p.x'||r.key==='ks.p.y')); }
 $('#canvas').addEventListener('pointerdown',e=>{
   const cv=$('#canvas'),r=cv.getBoundingClientRect();
   if(st.tool==='pen'){ e.preventDefault(); penClick((e.clientX-r.left)/st.scale,(e.clientY-r.top)/st.scale,e); return; }
   const target=e.target instanceof Element?e.target:e.target?.parentElement;
-  const L=hitLayer(target);
+  const L=hitLayer(target,e.clientX,e.clientY);
   if(!L){
     if(target===cv||target?.closest?.('.lot')){
       st.sel=null; st.itemSel=null; st.kf=null;
