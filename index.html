@@ -53,6 +53,9 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 .ruler-track .major-tick span{position:absolute;top:34px;left:0;transform:translateX(-50%);font:500 15px var(--mono);color:#252630;white-space:nowrap}
 .ruler-track .major-tick.first span{transform:none}
 .ruler-track .minor-dot{position:absolute;top:43px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:#e0e1e4}
+.ruler-playhead{position:absolute;top:0;bottom:0;width:0;border-left:2px solid #262630;z-index:7;pointer-events:none}
+.ruler-playhead:before{content:attr(data-frame);position:absolute;top:0;left:-20px;min-width:38px;height:34px;padding:0 5px;display:grid;place-items:center;border-radius:10px;background:#24242d;color:#fff;font:500 15px var(--mono);white-space:nowrap}
+.ruler-playhead:after{content:'';position:absolute;top:34px;left:-1px;height:18px;border-left:2px solid #24242d}
 .ruler-tools{position:absolute;right:7px;top:5px;display:flex;align-items:center;gap:6px;padding:3px 5px;background:rgba(255,255,255,.94);border-radius:6px;opacity:.18;transition:opacity .15s}
 .ruler-viewport:hover .ruler-tools,.ruler-tools:focus-within{opacity:1}
 .ruler-tools select{width:62px;padding:3px 5px;font-size:10px;border-color:#eee}
@@ -86,9 +89,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 .kf{position:absolute;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;transform:rotate(45deg);background:#d7d7da;border:1.5px solid #b9bac0;border-radius:1px;cursor:grab;z-index:2}
 .kf:hover{background:#c6c5ce;border-color:#858591}
 .kf.sel{background:var(--accent);border-color:#5b55df;outline:2px solid #e7e5ff;outline-offset:2px}
-#ph{position:absolute;top:-52px;bottom:0;width:0;border-left:2px solid #262630;z-index:6;pointer-events:none}
-#ph:before{content:attr(data-frame);position:absolute;top:0;left:-20px;min-width:38px;height:34px;padding:0 5px;display:grid;place-items:center;border-radius:10px;background:#24242d;color:#fff;font:500 15px var(--mono);white-space:nowrap}
-#ph:after{content:'';position:absolute;top:34px;left:-1px;height:18px;border-left:2px solid #24242d}
+#ph{position:absolute;top:0;bottom:0;width:0;border-left:2px solid #262630;z-index:6;pointer-events:none}
 @media(max-width:820px){
  .timeline{grid-template-rows:72px 260px;min-height:332px;flex:none}
  .transport{height:72px;min-height:72px}
@@ -227,6 +228,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
       </div>
       <div class="ruler-viewport" id="tlrulerViewport">
         <div class="ruler-track" id="tlruler"></div>
+        <div class="ruler-playhead" id="tlRulerPh" aria-hidden="true"></div>
         <div class="ruler-tools">
           <select id="tSpeed" title="Preview speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
           <label title="Timeline zoom">Zoom <input type="range" id="tlZoom" min="1" max="12" step="0.5" value="1"></label>
